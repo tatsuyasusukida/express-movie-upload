@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>
+      ブラウザで動画を収録してサーバーへ送るデモを Express.js で作る
+    </title>
+  </head>
+  <body>
+    <h1>ブラウザで動画を収録してサーバーへ送るデモを Express.js で作る</h1>
+    <div>
+      <button type="button" id="buttonStart">Start</button>
+      <button type="button" id="buttonStop" disabled>Stop</button>
+      <button type="button" id="buttonUploadBlob" disabled>
+        Upload (Blob)
+      </button>
+      <button type="button" id="buttonUploadDataURL" disabled>
+        Upload (DataURL)
+      </button>
+    </div>
+    <div>
+      <video autoplay muted playsinline id="videoLive"></video>
+    </div>
+    <div>
+      <video controls playsinline id="videoRecorded"></video>
+    </div>
+    <script>
+      async function main() {
+        const buttonStart = document.querySelector("#buttonStart");
+        const buttonStop = document.querySelector("#buttonStop");
+        const buttonUploadBlob = document.querySelector("#buttonUploadBlob");
+        const buttonUploadDataURL = document.querySelector(
+          "#buttonUploadDataURL"
+        );
+        const videoLive = document.querySelector("#videoLive");
+        const videoRecorded = document.querySelector("#videoRecorded");
+        let recordedVideoBlob = null;
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true,
+        });
+
+        videoLive.srcObject = stream;
+
+        const mediaRecorder = new MediaRecorder(stream, {
+          mimeType: "video/webm",
+        });
+
+        buttonStart.addEventListener("click", () => {
+          mediaRecorder.start();
+          buttonStart.setAttribute("disabled", "");
+          buttonStop.removeAttribute("disabled");
+        });
+
+        buttonStop.addEventListener("click", () => {
+          mediaRecorder.stop();
+          buttonStart.removeAttribute("disabled");
+          buttonStop.setAttribute("disabled", "");
+          buttonUploadBlob.removeAttribute("disabled");
+          buttonUploadDataURL.removeAttribute("disabled");
+        });
+
+        mediaRecorder.addEventListener("dataavailable", (event) => {
+          videoRecorded.src = URL.createObjectURL(event.data);
+          recordedVideoBlob = event.data;
+        });
+
+        buttonUploadBlob.addEventListener("click", async () => {
+          try {
+            const search = new URLSearchParams({
+              extname: ".webm",
+            }).toString();
+
+            const url = "/api/upload/blob?" + search;
+
+            console.log(recordedVideoBlob);
+
+            const response = await fetch(url, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/octet-stream",
+              },
+              body: recordedVideoBlob,
+            });
+
+            if (response.status !== 201) {
+              console.warn(response.status);
+              console.warn(await response.text());
+            }
+          } catch (err) {
+            console.error(err);
+          }
+        });
+
+        buttonUploadDataURL.addEventListener("click", async () => {
+          try {
+            const url = "/api/upload/dataurl";
+            const response = await fetch(url, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json; charset=UTF-8",
+              },
+              body: JSON.stringify({
+                extname: ".webm",
+                dataUrl: await convertBlob(recordedVideoBlob),
+              }),
+            });
+
+            if (response.status !== 201) {
+              console.warn(response.status);
+              console.warn(await response.text());
+            }
+          } catch (err) {
+            console.error(err);
+          }
+        });
+      }
+
+      async function convertBlob(blob) {
+        return await new Promise((resolve, reject) => {
+          const fileReader = new FileReader();
+
+          const subscribe = () => {
+            fileReader.addEventListener("abort", onAbort);
+            fileReader.addEventListener("error", onError);
+            fileReader.addEventListener("load", onLoad);
+          };
+
+          const unsubscribe = () => {
+            fileReader.removeEventListener("abort", onAbort);
+            fileReader.removeEventListener("error", onError);
+            fileReader.removeEventListener("load", onLoad);
+          };
+
+          const onAbort = () => {
+            unsubscribe();
+            reject(new Error("abort"));
+          };
+
+          const onError = (event) => {
+            unsubscribe();
+            reject(event.target.error);
+          };
+
+          const onLoad = (event) => {
+            unsubscribe();
+            resolve(event.target.result);
+          };
+
+          subscribe();
+          fileReader.readAsDataURL(blob);
+        });
+      }
+
+      main();
+    </script>
+  </body>
+</html>
